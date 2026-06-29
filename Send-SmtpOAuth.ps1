@@ -171,10 +171,13 @@ function New-PkcePair {
 }
 
 function Get-DefaultTokenCachePath {
-    param([string]$ClientId)
+    # Cache pro ClientId UND Benutzer -> beim Wechsel zwischen Postfaechern wird nie
+    # versehentlich das Refresh-Token eines anderen Kontos wiederverwendet.
+    param([string]$ClientId, [string]$User)
     $dir = Join-Path $env:LOCALAPPDATA 'SmtpOAuth'
     if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
-    Join-Path $dir ("token.{0}.xml" -f $ClientId)
+    $safeUser = ($User -replace '[^A-Za-z0-9._@-]', '_')
+    Join-Path $dir ("token.{0}.{1}.xml" -f $ClientId, $safeUser)
 }
 
 function Save-RefreshToken {
@@ -332,7 +335,7 @@ function Get-AccessToken-AuthorizationCode {
     $redirectUri = "http://localhost:$RedirectPort/"
     $state       = [Guid]::NewGuid().ToString('N')
 
-    $authUrl = "$Authority/oauth2/v2.0/authorize?" + (@(
+    $authParams = @(
         "client_id=$ClientId"
         "response_type=code"
         "redirect_uri=$([Uri]::EscapeDataString($redirectUri))"
@@ -341,7 +344,13 @@ function Get-AccessToken-AuthorizationCode {
         "state=$state"
         "code_challenge=$($pkce.Challenge)"
         "code_challenge_method=S256"
-    ) -join '&')
+        # Konto vorbelegen, damit nicht stillschweigend die falsche SSO-Sitzung greift
+        "login_hint=$([Uri]::EscapeDataString($From))"
+    )
+    # Bei -ForceLogin die Kontoauswahl erzwingen (sonst meldet der Browser per SSO ggf. ein
+    # anderes, bereits angemeldetes Konto an -> Token-upn passt nicht zu -From -> SMTP 535)
+    if ($ForceLogin) { $authParams += "prompt=select_account" }
+    $authUrl = "$Authority/oauth2/v2.0/authorize?" + ($authParams -join '&')
 
     # Lokalen Listener starten, BEVOR der Browser oeffnet
     $listener = New-Object System.Net.HttpListener
@@ -402,7 +411,7 @@ function Get-AccessToken {
     }
 
     # Delegierte Flows mit Refresh-Token-Cache
-    if (-not $TokenCachePath) { $TokenCachePath = Get-DefaultTokenCachePath -ClientId $ClientId }
+    if (-not $TokenCachePath) { $TokenCachePath = Get-DefaultTokenCachePath -ClientId $ClientId -User $From }
 
     if (-not $ForceLogin) {
         $cachedRt = Read-RefreshToken -Path $TokenCachePath
@@ -553,18 +562,26 @@ $token = Get-AccessToken
 if ([string]::IsNullOrEmpty($token)) { throw "Kein Access-Token erhalten." }
 Write-Host "Access-Token erhalten." -ForegroundColor Green
 
-# Diagnose: relevante Token-Claims anzeigen (kein Geheimnis-Leak - nur Claims, nicht das Token)
-if ($VerbosePreference -ne 'SilentlyContinue') {
-    $claims = Get-JwtClaims $token
-    if ($claims) {
-        $scp   = if ($claims.PSObject.Properties.Name -contains 'scp')   { $claims.scp }   else { '(keine - evtl. App-only/falsche Ressource)' }
-        $roles = if ($claims.PSObject.Properties.Name -contains 'roles') { ($claims.roles -join ' ') } else { '' }
-        $upn   = if ($claims.PSObject.Properties.Name -contains 'upn')   { $claims.upn }
+# Token-Claims auswerten - Diagnose + Vorab-Pruefung
+$claims = Get-JwtClaims $token
+if ($claims) {
+    $scp   = if ($claims.PSObject.Properties.Name -contains 'scp')   { $claims.scp }   else { '' }
+    $roles = if ($claims.PSObject.Properties.Name -contains 'roles') { ($claims.roles -join ' ') } else { '' }
+    $tokenUser = if ($claims.PSObject.Properties.Name -contains 'upn')   { $claims.upn }
                  elseif ($claims.PSObject.Properties.Name -contains 'preferred_username') { $claims.preferred_username } else { '' }
+    if ($VerbosePreference -ne 'SilentlyContinue') {
         Write-Verbose "Token aud : $($claims.aud)    (muss https://outlook.office365.com sein)"
-        Write-Verbose "Token scp : $scp              (muss SMTP.Send enthalten)"
+        Write-Verbose "Token scp : $(if($scp){$scp}else{'(keine - evtl. App-only/falsche Ressource)'})              (muss SMTP.Send enthalten)"
         if ($roles) { Write-Verbose "Token roles: $roles" }
-        Write-Verbose "Token upn : $upn              (muss zu -From '$From' passen)"
+        Write-Verbose "Token upn : $(if($tokenUser){$tokenUser}else{'(keine - App-only)'})              (muss zu -From '$From' passen)"
+    }
+    # Bei delegierten Flows MUSS der Token-Benutzer zum Absender passen, sonst lehnt
+    # Exchange XOAUTH2 mit '535 5.7.3' ab (Token-User != MAIL FROM).
+    if ($Flow -ne 'ClientCredentials' -and $tokenUser -and ($tokenUser -ne $From)) {
+        throw ("Token gehoert zu '$tokenUser', gesendet werden soll aber als '$From'. " +
+               "Du bist im Browser mit dem falschen Konto angemeldet. " +
+               "Melde dich als '$From' an (mit -ForceLogin wird die Kontoauswahl erzwungen) " +
+               "oder setze -From auf '$tokenUser'.")
     }
 }
 
