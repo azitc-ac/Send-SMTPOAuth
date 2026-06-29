@@ -628,6 +628,12 @@ $token = Get-AccessToken
 if ([string]::IsNullOrEmpty($token)) { throw "Kein Access-Token erhalten." }
 Write-Host "Access-Token erhalten." -ForegroundColor Green
 
+# XOAUTH2 user= bestimmen:
+#  - Delegiert (AuthCode/DeviceCode): die Anmelde-Identitaet ($AuthUser), muss zum Token-upn passen.
+#  - App-only (ClientCredentials): es gibt keine Anmelde-Person -> user= ist das Postfach selbst
+#    ($From). -AuthUser ist hier bedeutungslos und koennte bei eng gescopter App sogar fehlschlagen.
+$smtpAuthUser = if ($Flow -eq 'ClientCredentials') { $From } else { $AuthUser }
+
 # Token-Claims auswerten - Diagnose + Vorab-Pruefung
 $claims = Get-JwtClaims $token
 if ($claims) {
@@ -639,7 +645,8 @@ if ($claims) {
         Write-Verbose "Token aud : $($claims.aud)    (muss https://outlook.office365.com sein)"
         Write-Verbose "Token scp : $(if($scp){$scp}else{'(keine - evtl. App-only/falsche Ressource)'})              (muss SMTP.Send enthalten)"
         if ($roles) { Write-Verbose "Token roles: $roles" }
-        Write-Verbose "Token upn : $(if($tokenUser){$tokenUser}else{'(keine - App-only)'})              (muss zu -AuthUser '$AuthUser' passen)"
+        $upnHint = if ($Flow -eq 'ClientCredentials') { '(App-only: roles statt upn, siehe oben)' } else { "(muss zu -AuthUser '$AuthUser' passen)" }
+        Write-Verbose "Token upn : $(if($tokenUser){$tokenUser}else{'(keine - App-only)'})              $upnHint"
     }
     # Bei delegierten Flows MUSS der Token-Benutzer zur Anmelde-Identitaet (XOAUTH2 user=)
     # passen, sonst lehnt Exchange XOAUTH2 mit '535 5.7.3' ab.
@@ -653,12 +660,12 @@ if ($claims) {
     }
 }
 
-if ($AuthUser -ne $From) {
-    Write-Host "Anmeldung als '$AuthUser', Versand als '$From' (Shared Mailbox / SendAs)." -ForegroundColor Cyan
+if ($Flow -ne 'ClientCredentials' -and $smtpAuthUser -ne $From) {
+    Write-Host "Anmeldung als '$smtpAuthUser', Versand als '$From' (Shared Mailbox / SendAs)." -ForegroundColor Cyan
 }
 Write-Host "Sende E-Mail ueber $SmtpServer`:$Port (XOAUTH2)..." -ForegroundColor Cyan
-# XOAUTH2-user = Anmelde-Identitaet ($AuthUser); MAIL FROM / From-Header = Absender ($From)
-Send-MailXoauth2 -Server $SmtpServer -Port $Port -User $AuthUser -AccessToken $token `
+# XOAUTH2-user = $smtpAuthUser; MAIL FROM / From-Header = Absender ($From)
+Send-MailXoauth2 -Server $SmtpServer -Port $Port -User $smtpAuthUser -AccessToken $token `
     -From $From -To $To -Cc $Cc -Subject $Subject -Body $Body -Html:$BodyAsHtml.IsPresent
 
 Write-Host "E-Mail erfolgreich versendet an: $($To -join ', ')" -ForegroundColor Green
