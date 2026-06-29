@@ -199,20 +199,39 @@ function Read-RefreshToken {
     }
 }
 
+function Get-WebErrorDetail {
+    # Liest den HTTP-Antwort-Body eines fehlgeschlagenen Invoke-RestMethod/-WebRequest aus.
+    # Funktioniert in Windows PowerShell 5.1 UND PowerShell 7:
+    #   - 5.1: WebException -> .Response.GetResponseStream()
+    #   - 7  : HttpResponseException -> Body liegt in $_.ErrorDetails.Message
+    param([System.Management.Automation.ErrorRecord]$ErrorRecord)
+
+    # 1) ErrorDetails.Message enthaelt in beiden Versionen meist direkt den Response-Body
+    if ($ErrorRecord.ErrorDetails -and $ErrorRecord.ErrorDetails.Message) {
+        return $ErrorRecord.ErrorDetails.Message
+    }
+    # 2) Fallback: Stream der WebException (5.1)
+    $ex = $ErrorRecord.Exception
+    if ($ex.PSObject.Properties.Name -contains 'Response' -and $ex.Response) {
+        try {
+            $stream = $ex.Response.GetResponseStream()
+            if ($stream) {
+                $reader = New-Object IO.StreamReader($stream)
+                $body = $reader.ReadToEnd()
+                if ($body) { return $body }
+            }
+        } catch { }
+    }
+    # 3) Letzter Fallback: Exception-Text
+    return $ex.Message
+}
+
 function Invoke-TokenEndpoint {
     param([string]$TokenUrl, [hashtable]$Form)
     try {
         return Invoke-RestMethod -Method Post -Uri $TokenUrl -Body $Form -ContentType 'application/x-www-form-urlencoded'
     } catch {
-        # Fehlerdetails aus dem AAD-JSON-Body herausziehen
-        $detail = $_.Exception.Message
-        if ($_.Exception.Response) {
-            try {
-                $reader = New-Object IO.StreamReader($_.Exception.Response.GetResponseStream())
-                $detail = $reader.ReadToEnd()
-            } catch { }
-        }
-        throw "Token-Endpoint-Fehler: $detail"
+        throw "Token-Endpoint-Fehler: $(Get-WebErrorDetail $_)"
     }
 }
 
@@ -281,12 +300,7 @@ function Get-AccessToken-DeviceCode {
             return $tok
         } catch {
             $err = $null
-            if ($_.Exception.Response) {
-                try {
-                    $reader = New-Object IO.StreamReader($_.Exception.Response.GetResponseStream())
-                    $err = ($reader.ReadToEnd() | ConvertFrom-Json).error
-                } catch { }
-            }
+            try { $err = (Get-WebErrorDetail $_ | ConvertFrom-Json).error } catch { }
             switch ($err) {
                 'authorization_pending' { }                              # weiter warten
                 'slow_down'             { $interval += 5 }
