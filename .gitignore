@@ -1,0 +1,16 @@
+# OAuth Token-Cache (wird per DPAPI lokal abgelegt – niemals committen)
+token.*.xml
+*.tokencache
+secrets.ps1
+*.secret
+
+# PowerShell / Build
+*.tmp
+*.log
+
+# Editor / OS
+.vs/
+.vscode/
+*.suo
+.DS_Store
+Thumbs.db
