@@ -1,3 +1,4 @@
+#Requires -Version 5.1
 <#
 .SYNOPSIS
     Versendet E-Mails ueber Microsoft 365 / Exchange Online per echtem SMTP (smtp.office365.com:587,
@@ -458,7 +459,8 @@ function Send-MailXoauth2 {
 
         # TLS-Upgrade
         $ssl = New-Object System.Net.Security.SslStream($stream, $false)
-        $ssl.AuthenticateAsClient($Server, $null, [Net.SecurityProtocolType]::Tls12, $false)
+        # SslProtocols (NICHT SecurityProtocolType) ist der korrekte Enum-Typ dieser Methode
+        $ssl.AuthenticateAsClient($Server, $null, [System.Security.Authentication.SslProtocols]::Tls12, $false)
         $reader = New-Object IO.StreamReader($ssl, [Text.Encoding]::ASCII)
         $writer = New-Object IO.StreamWriter($ssl, [Text.Encoding]::ASCII)
         $writer.NewLine = "`r`n"
