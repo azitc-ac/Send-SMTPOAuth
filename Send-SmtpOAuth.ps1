@@ -199,6 +199,19 @@ function Read-RefreshToken {
     }
 }
 
+function Get-JwtClaims {
+    # Dekodiert die Payload (Claims) eines JWT-Access-Tokens - rein lokal, ohne Signaturpruefung.
+    param([string]$Jwt)
+    try {
+        $parts = $Jwt.Split('.')
+        if ($parts.Count -lt 2) { return $null }
+        $p = $parts[1].Replace('-', '+').Replace('_', '/')
+        switch ($p.Length % 4) { 2 { $p += '==' } 3 { $p += '=' } }
+        $json = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($p))
+        return $json | ConvertFrom-Json
+    } catch { return $null }
+}
+
 function Get-WebErrorDetail {
     # Liest den HTTP-Antwort-Body eines fehlgeschlagenen Invoke-RestMethod/-WebRequest aus.
     # Funktioniert in Windows PowerShell 5.1 UND PowerShell 7:
@@ -539,6 +552,21 @@ function Send-MailXoauth2 {
 $token = Get-AccessToken
 if ([string]::IsNullOrEmpty($token)) { throw "Kein Access-Token erhalten." }
 Write-Host "Access-Token erhalten." -ForegroundColor Green
+
+# Diagnose: relevante Token-Claims anzeigen (kein Geheimnis-Leak - nur Claims, nicht das Token)
+if ($VerbosePreference -ne 'SilentlyContinue') {
+    $claims = Get-JwtClaims $token
+    if ($claims) {
+        $scp   = if ($claims.PSObject.Properties.Name -contains 'scp')   { $claims.scp }   else { '(keine - evtl. App-only/falsche Ressource)' }
+        $roles = if ($claims.PSObject.Properties.Name -contains 'roles') { ($claims.roles -join ' ') } else { '' }
+        $upn   = if ($claims.PSObject.Properties.Name -contains 'upn')   { $claims.upn }
+                 elseif ($claims.PSObject.Properties.Name -contains 'preferred_username') { $claims.preferred_username } else { '' }
+        Write-Verbose "Token aud : $($claims.aud)    (muss https://outlook.office365.com sein)"
+        Write-Verbose "Token scp : $scp              (muss SMTP.Send enthalten)"
+        if ($roles) { Write-Verbose "Token roles: $roles" }
+        Write-Verbose "Token upn : $upn              (muss zu -From '$From' passen)"
+    }
+}
 
 Write-Host "Sende E-Mail ueber $SmtpServer`:$Port (XOAUTH2)..." -ForegroundColor Cyan
 Send-MailXoauth2 -Server $SmtpServer -Port $Port -User $From -AccessToken $token `
