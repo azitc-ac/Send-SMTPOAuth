@@ -363,14 +363,17 @@ function Get-AccessToken-DeviceCode {
             } -ContentType 'application/x-www-form-urlencoded'
             return $tok
         } catch {
+            # $_ hier sichern: innerhalb des folgenden switch ist $_ die Switch-Variable ($err),
+            # NICHT mehr der Fehler aus diesem catch.
+            $errBody = Get-WebErrorDetail $_
             $err = $null
-            try { $err = (Get-WebErrorDetail $_ | ConvertFrom-Json).error } catch { }
+            try { $err = ($errBody | ConvertFrom-Json).error } catch { }
             switch ($err) {
                 'authorization_pending' { }                              # weiter warten
                 'slow_down'             { $interval += 5 }
                 'expired_token'         { throw "Device-Code abgelaufen - bitte erneut starten." }
                 'authorization_declined'{ throw "Login wurde abgelehnt." }
-                default                 { throw "Device-Code-Fehler: $($_.Exception.Message)" }
+                default                 { throw "Device-Code-Fehler: $errBody" }
             }
         }
     }
