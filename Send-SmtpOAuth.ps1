@@ -463,7 +463,10 @@ function Get-AccessToken {
 function New-Xoauth2Token {
     param([string]$User, [string]$AccessToken)
     # SASL XOAUTH2: "user=<user>^Aauth=Bearer <token>^A^A" (^A = 0x01), Base64
-    $raw = "user=$User`x01auth=Bearer $AccessToken`x01`x01"
+    # WICHTIG: PowerShell kennt KEIN `x01-Hex-Escape - das ergaebe den Literaltext "x01".
+    # Das Steuerzeichen muss explizit ueber [char]1 eingefuegt werden.
+    $ctrlA = [char]1
+    $raw = "user=$User${ctrlA}auth=Bearer $AccessToken${ctrlA}${ctrlA}"
     [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes($raw))
 }
 
