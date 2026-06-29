@@ -397,10 +397,23 @@ function Get-AccessToken-AuthorizationCode {
             $hasErr   = $request.QueryString['error']
 
             $isResult = $hasCode -or $hasErr
+            # window.close() ist nur "best effort": Browser schliessen i.d.R. nur per Script
+            # geoeffnete Fenster - ein per OS geoeffneter Tab bleibt offen (Fallback-Text).
             $html = if ($hasCode) {
-                "<html><body style='font-family:sans-serif'><h2>Login erfolgreich</h2>Dieses Fenster kann geschlossen werden.</body></html>"
+                @"
+<!DOCTYPE html><html lang="de"><head><meta charset="utf-8"><title>Login erfolgreich</title></head>
+<body style="font-family:sans-serif;text-align:center;margin-top:15%">
+<h2>&#10003; Login erfolgreich</h2>
+<p id="m">Dieses Fenster kann geschlossen werden.</p>
+<script>
+  setTimeout(function(){ try{ window.open('','_self'); window.close(); }catch(e){} }, 300);
+  setTimeout(function(){ document.getElementById('m').textContent =
+    'Anmeldung abgeschlossen. Du kannst dieses Fenster jetzt schliessen.'; }, 800);
+</script>
+</body></html>
+"@
             } elseif ($hasErr) {
-                "<html><body style='font-family:sans-serif'><h2>Login fehlgeschlagen</h2>$hasErr</body></html>"
+                "<html><body style='font-family:sans-serif;text-align:center;margin-top:15%'><h2>Login fehlgeschlagen</h2><p>$hasErr</p></body></html>"
             } else {
                 "<html><body>OK</body></html>"   # favicon o.ae. - trotzdem sauber antworten
             }
