@@ -41,6 +41,41 @@ Ein Skript, drei OAuth2-Flows:
 
 ---
 
+## Welchen Flow wählen? – Vor- & Nachteile
+
+**Faustregel:** Kein Mensch im Spiel → **ClientCredentials**. Mensch + Browser am selben Gerät →
+**AuthorizationCode**. Mensch, aber Gerät ohne brauchbaren Browser (Drucker/MFP, IoT, headless) →
+**DeviceCode**.
+
+| Flow | Typischer Einsatz | Vorteile | Nachteile |
+|------|-------------------|----------|-----------|
+| **ClientCredentials** (app-only) | Unbeaufsichtigte Automatisierung: Scheduled Tasks, Monitoring/Alerting, Server-/Daemon-Dienste | Kein Benutzer nötig; unterliegt **keiner** Benutzer-CA/MFA; überlebt Passwort-Änderungen & Session-Revokes; erneuert sich rein über Secret/Zertifikat → **robustester Dauerläufer** | Aufwändigster Setup (Exchange-Service-Principal + `FullAccess`); Secret/Zertifikat muss rotiert werden; sendet „als App", nicht als Person |
+| **AuthorizationCode** (PKCE) | Interaktives Tool auf einem Rechner **mit** Browser; persönliches oder Shared-Postfach | Einfacher Setup (nur App-Reg.); sendet **als der Benutzer** (Mail in „Gesendete Elemente"); per Refresh-Token **ebenfalls Dauerläufer** ohne erneuten Login | Einmaliger Browser-Login nötig; Refresh-Token an Benutzer-Lebenszyklus gebunden (s. u.) |
+| **DeviceCode** | Geräte **ohne** brauchbaren Browser/Tastatur: Drucker/MFP (Kyocera!), IoT, headless Server, Remote-CLI | Login auf separatem Gerät per Code; keine Redirect-URI nötig; per Refresh-Token Dauerläufer | Setzt **„Allow public client flows = Yes"** voraus; Login interaktiv (einmalig); Refresh-Token an Benutzer gebunden |
+
+### Dauerläufer ohne erneuten Login
+
+Beide delegierten Flows (AuthorizationCode/DeviceCode) werden mit `offline_access` zu **unbeaufsichtigten
+Dauerläufern** – genau wie viele SaaS-„Postfach einmal verbinden"-Dienste (und wie ein Kyocera-Drucker):
+
+- Entra liefert ein **Refresh-Token** mit **gleitendem Fenster + Rotation**: Jeder Refresh erzeugt ein
+  neues Access- **und** Refresh-Token. Solange es regelmäßig genutzt wird, verschiebt sich der Ablauf
+  immer weiter → **effektiv unbegrenzt**. Erst **90 Tage komplette Inaktivität** lassen es verfallen.
+- Dieses Skript cacht das Refresh-Token (DPAPI) und rotiert es bei jedem Lauf automatisch. Der
+  interaktive Login ist also wirklich nur **einmalig**; per Scheduled Task läuft es dann unbeaufsichtigt.
+
+**Aber:** Ein Refresh-Token ist an die **Benutzer-Identität** gebunden und wird **ungültig** bei
+Passwort-Änderung/-Reset, Session-Revoke (`Revoke-MgUserSignInSession` / „Sign out everywhere"),
+bestimmten Conditional-Access-/Risk-Events, MFA-Änderungen, deaktiviertem Konto oder >90 Tagen ohne
+Nutzung. Dann ist **einmal** ein neuer interaktiver Login fällig.
+
+→ **Für „als Benutzer X, läuft lange"**: AuthorizationCode/DeviceCode + Refresh-Token.
+**Für „reiner Dienst, maximal wartungsarm"**: ClientCredentials (nicht an einen Benutzer gebunden).
+Beide laufen dauerhaft unbeaufsichtigt – sie unterscheiden sich nur darin, *was* das Token am Leben
+hält: Benutzer-Session vs. App-Credential.
+
+---
+
 ## Voraussetzungen einrichten
 
 Es gibt **drei** Bausteine. Welche du brauchst, hängt vom Flow ab:
