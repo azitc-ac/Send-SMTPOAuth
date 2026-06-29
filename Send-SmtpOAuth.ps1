@@ -407,11 +407,19 @@ function Get-AccessToken-AuthorizationCode {
 <!DOCTYPE html><html lang="de"><head><meta charset="utf-8"><title>Login erfolgreich</title></head>
 <body style="font-family:sans-serif;text-align:center;margin-top:15%">
 <h2>&#10003; Login erfolgreich</h2>
-<p id="m">Dieses Fenster kann geschlossen werden.</p>
+<p id="m">Fenster schliesst in 3 Sekunden...</p>
 <script>
-  setTimeout(function(){ try{ window.open('','_self'); window.close(); }catch(e){} }, 300);
-  setTimeout(function(){ document.getElementById('m').textContent =
-    'Anmeldung abgeschlossen. Du kannst dieses Fenster jetzt schliessen.'; }, 800);
+  var n = 3;
+  var t = setInterval(function(){
+    n--;
+    if (n > 0) { document.getElementById('m').textContent = 'Fenster schliesst in ' + n + ' Sekunde(n)...'; }
+  }, 1000);
+  // Nach 3 s schliessen versuchen (Browser erlauben das nur fuer per Script geoeffnete Fenster)
+  setTimeout(function(){
+    clearInterval(t);
+    try { window.open('','_self'); window.close(); } catch(e) {}
+    document.getElementById('m').textContent = 'Anmeldung abgeschlossen. Du kannst dieses Fenster jetzt schliessen.';
+  }, 3000);
 </script>
 </body></html>
 "@
