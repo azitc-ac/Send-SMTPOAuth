@@ -385,23 +385,42 @@ function Get-AccessToken-AuthorizationCode {
     Write-Host "Browser wird geoeffnet fuer den Login..." -ForegroundColor Cyan
     Start-Process $authUrl
 
+    $code = $null; $retState = $null; $oauthErr = $null
     try {
-        $context  = $listener.GetContext()   # blockiert bis Redirect eintrifft
-        $request  = $context.Request
-        $code     = $request.QueryString['code']
-        $retState = $request.QueryString['state']
-        $oauthErr = $request.QueryString['error']
+        # Auf die Anfrage MIT code/error warten und Nebenanfragen (favicon, Preconnect von
+        # Chrome) sauber mit einer Antwort beenden - sonst zeigt der Browser faelschlich
+        # ERR_CONNECTION_REFUSED, obwohl der code laengst empfangen wurde.
+        while ($true) {
+            $context  = $listener.GetContext()   # blockiert bis eine Anfrage eintrifft
+            $request  = $context.Request
+            $hasCode  = $request.QueryString['code']
+            $hasErr   = $request.QueryString['error']
 
-        # Browserseitige Rueckmeldung
-        $html = if ($code) {
-            "<html><body style='font-family:sans-serif'><h2>Login erfolgreich</h2>Dieses Fenster kann geschlossen werden.</body></html>"
-        } else {
-            "<html><body style='font-family:sans-serif'><h2>Login fehlgeschlagen</h2>$oauthErr</body></html>"
+            $isResult = $hasCode -or $hasErr
+            $html = if ($hasCode) {
+                "<html><body style='font-family:sans-serif'><h2>Login erfolgreich</h2>Dieses Fenster kann geschlossen werden.</body></html>"
+            } elseif ($hasErr) {
+                "<html><body style='font-family:sans-serif'><h2>Login fehlgeschlagen</h2>$hasErr</body></html>"
+            } else {
+                "<html><body>OK</body></html>"   # favicon o.ae. - trotzdem sauber antworten
+            }
+            $buffer = [Text.Encoding]::UTF8.GetBytes($html)
+            try {
+                $context.Response.StatusCode  = 200
+                $context.Response.ContentType = 'text/html; charset=utf-8'
+                $context.Response.ContentLength64 = $buffer.Length
+                $context.Response.OutputStream.Write($buffer, 0, $buffer.Length)
+                $context.Response.OutputStream.Flush()
+            } catch { }
+            $context.Response.Close()   # flusht und schliesst die Verbindung sauber
+
+            if ($isResult) {
+                $code     = $hasCode
+                $retState = $request.QueryString['state']
+                $oauthErr = $hasErr
+                break
+            }
         }
-        $buffer = [Text.Encoding]::UTF8.GetBytes($html)
-        $context.Response.ContentLength64 = $buffer.Length
-        $context.Response.OutputStream.Write($buffer, 0, $buffer.Length)
-        $context.Response.OutputStream.Close()
     } finally {
         $listener.Stop()
         $listener.Close()
