@@ -4,7 +4,7 @@
     STARTTLS) mit OAuth2-Authentifizierung (SASL XOAUTH2).
 
     Unterstuetzt drei OAuth2-Flows:
-      - ClientCredentials : App-only, unbeaufsichtigt (ideal fuer SCCM/Automatisierung)
+      - ClientCredentials : App-only, unbeaufsichtigt (Automatisierung / Scheduled Tasks / Monitoring)
       - AuthorizationCode : Interaktiver Benutzer-Login per lokalem Loopback-Listener (+ PKCE)
       - DeviceCode        : Login an separatem Geraet/Browser per Code
 
@@ -76,10 +76,10 @@
     Erzwingt bei delegierten Flows einen neuen Login und ignoriert das Cache.
 
 .EXAMPLE
-    # App-only (SCCM-Automatisierung)
+    # App-only (unbeaufsichtigte Automatisierung)
     .\Send-SmtpOAuth.ps1 -Flow ClientCredentials -TenantId contoso.onmicrosoft.com `
-        -ClientId 1111... -ClientSecret 'sec...' -From sccm-alerts@contoso.com `
-        -To admin@contoso.com -Subject 'Test' -Body 'Hallo aus SCCM'
+        -ClientId 1111... -ClientSecret 'sec...' -From alerts@contoso.com `
+        -To admin@contoso.com -Subject 'Test' -Body 'Hallo aus der Automatisierung'
 
 .EXAMPLE
     # Interaktiver Login (Browser auf diesem Rechner)

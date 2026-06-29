@@ -7,7 +7,7 @@ Ein Skript, drei Flows:
 
 | Flow | Einsatz | Login |
 |------|---------|-------|
-| `ClientCredentials` | App-only, unbeaufsichtigt – ideal für SCCM/Automatisierung | kein interaktiver Login |
+| `ClientCredentials` | App-only, unbeaufsichtigt – Automatisierung / Scheduled Tasks / Monitoring | kein interaktiver Login |
 | `AuthorizationCode` | Persönliches Postfach, Browser auf diesem Rechner | einmalig interaktiv, danach Refresh-Token-Cache |
 | `DeviceCode`        | Login an separatem Gerät/Browser per Code | einmalig interaktiv, danach Refresh-Token-Cache |
 
@@ -37,10 +37,10 @@ Ein Skript, drei Flows:
 ## Beispiele
 
 ```powershell
-# App-only (SCCM)
+# App-only – unbeaufsichtigt (Automatisierung / Scheduled Task / Monitoring)
 .\Send-SmtpOAuth.ps1 -Flow ClientCredentials -TenantId contoso.onmicrosoft.com `
-    -ClientId <appid> -ClientSecret '<secret>' -From sccm-alerts@contoso.com `
-    -To admin@contoso.com -Subject 'SCCM Alert' -Body 'Hallo aus SCCM'
+    -ClientId <appid> -ClientSecret '<secret>' -From alerts@contoso.com `
+    -To admin@contoso.com -Subject 'Alert' -Body 'Hallo aus der Automatisierung'
 
 # Interaktiver Login (Browser hier)
 .\Send-SmtpOAuth.ps1 -Flow AuthorizationCode -TenantId organizations `
