@@ -393,8 +393,11 @@ function Get-AccessToken-AuthorizationCode {
         while ($true) {
             $context  = $listener.GetContext()   # blockiert bis eine Anfrage eintrifft
             $request  = $context.Request
+            # ALLE Query-Werte JETZT lesen - nach $context.Response.Close() liefert
+            # $request.QueryString in Windows PowerShell 5.1 $null (Objekt entwertet).
             $hasCode  = $request.QueryString['code']
             $hasErr   = $request.QueryString['error']
+            $hasState = $request.QueryString['state']
 
             $isResult = $hasCode -or $hasErr
             # window.close() ist nur "best effort": Browser schliessen i.d.R. nur per Script
@@ -429,7 +432,7 @@ function Get-AccessToken-AuthorizationCode {
 
             if ($isResult) {
                 $code     = $hasCode
-                $retState = $request.QueryString['state']
+                $retState = $hasState
                 $oauthErr = $hasErr
                 break
             }
