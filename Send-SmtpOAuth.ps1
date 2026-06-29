@@ -43,7 +43,14 @@
     Client-Secret (nur fuer ClientCredentials erforderlich). Als SecureString oder Klartext.
 
 .PARAMETER From
-    Absenderadresse. Bei ClientCredentials das Postfach, fuer das die App SendAs-Recht hat.
+    Absenderadresse (MAIL FROM und From:-Header). Bei ClientCredentials das Postfach,
+    fuer das die App SendAs-Recht hat. Bei einer Shared Mailbox die Shared-Mailbox-Adresse.
+
+.PARAMETER AuthUser
+    Anmelde-Identitaet fuer die XOAUTH2-Authentifizierung (der Benutzer, dessen Token verwendet
+    wird). Standard: gleich -From. Nur fuer delegierte Flows (AuthorizationCode/DeviceCode)
+    relevant. Fuer eine Shared Mailbox hier den lizenzierten Benutzer angeben, der SendAs-Recht
+    auf die Shared Mailbox hat - die Diskrepanz zu -From ist dann gewollt.
 
 .PARAMETER To
     Eine oder mehrere Empfaengeradressen.
@@ -92,6 +99,12 @@
     .\Send-SmtpOAuth.ps1 -Flow DeviceCode -TenantId organizations `
         -ClientId 1111... -From me@contoso.com -To you@contoso.com -Subject 'Hi' -Body 'Test'
 
+.EXAMPLE
+    # Shared Mailbox: Anmeldung als lizenzierter Benutzer mit SendAs-Recht, Versand als Shared Mailbox
+    .\Send-SmtpOAuth.ps1 -Flow AuthorizationCode -TenantId organizations -ClientId 1111... `
+        -AuthUser me@contoso.com -From info@contoso.com `
+        -To you@contoso.com -Subject 'Hi' -Body 'Test'
+
 .NOTES
     Microsoft deaktiviert Basic-SMTP-Auth fortlaufend; OAuth2/XOAUTH2 ist der unterstuetzte Weg.
     SMTP AUTH muss organisations- und postfachseitig aktiviert sein.
@@ -112,6 +125,8 @@ param(
 
     [Parameter(Mandatory)]
     [string]$From,
+
+    [string]$AuthUser,
 
     [Parameter(Mandatory)]
     [string[]]$To,
@@ -138,6 +153,11 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+# Anmelde-Identitaet (XOAUTH2 user=) vom Absender (MAIL FROM / From:) trennen.
+# Normalfall: identisch. Shared Mailbox: -AuthUser = lizenzierter Benutzer mit SendAs-Recht,
+# -From = Shared-Mailbox-Adresse. Hier ist die Diskrepanz gewollt und korrekt.
+if (-not $AuthUser) { $AuthUser = $From }
 
 # TLS 1.2 erzwingen (aeltere Windows-PowerShell-Defaults sind teils TLS 1.0)
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -345,7 +365,7 @@ function Get-AccessToken-AuthorizationCode {
         "code_challenge=$($pkce.Challenge)"
         "code_challenge_method=S256"
         # Konto vorbelegen, damit nicht stillschweigend die falsche SSO-Sitzung greift
-        "login_hint=$([Uri]::EscapeDataString($From))"
+        "login_hint=$([Uri]::EscapeDataString($AuthUser))"
     )
     # Bei -ForceLogin die Kontoauswahl erzwingen (sonst meldet der Browser per SSO ggf. ein
     # anderes, bereits angemeldetes Konto an -> Token-upn passt nicht zu -From -> SMTP 535)
@@ -411,7 +431,7 @@ function Get-AccessToken {
     }
 
     # Delegierte Flows mit Refresh-Token-Cache
-    if (-not $TokenCachePath) { $TokenCachePath = Get-DefaultTokenCachePath -ClientId $ClientId -User $From }
+    if (-not $TokenCachePath) { $TokenCachePath = Get-DefaultTokenCachePath -ClientId $ClientId -User $AuthUser }
 
     if (-not $ForceLogin) {
         $cachedRt = Read-RefreshToken -Path $TokenCachePath
@@ -573,20 +593,26 @@ if ($claims) {
         Write-Verbose "Token aud : $($claims.aud)    (muss https://outlook.office365.com sein)"
         Write-Verbose "Token scp : $(if($scp){$scp}else{'(keine - evtl. App-only/falsche Ressource)'})              (muss SMTP.Send enthalten)"
         if ($roles) { Write-Verbose "Token roles: $roles" }
-        Write-Verbose "Token upn : $(if($tokenUser){$tokenUser}else{'(keine - App-only)'})              (muss zu -From '$From' passen)"
+        Write-Verbose "Token upn : $(if($tokenUser){$tokenUser}else{'(keine - App-only)'})              (muss zu -AuthUser '$AuthUser' passen)"
     }
-    # Bei delegierten Flows MUSS der Token-Benutzer zum Absender passen, sonst lehnt
-    # Exchange XOAUTH2 mit '535 5.7.3' ab (Token-User != MAIL FROM).
-    if ($Flow -ne 'ClientCredentials' -and $tokenUser -and ($tokenUser -ne $From)) {
-        throw ("Token gehoert zu '$tokenUser', gesendet werden soll aber als '$From'. " +
+    # Bei delegierten Flows MUSS der Token-Benutzer zur Anmelde-Identitaet (XOAUTH2 user=)
+    # passen, sonst lehnt Exchange XOAUTH2 mit '535 5.7.3' ab.
+    # Achtung: verglichen wird gegen $AuthUser, NICHT gegen $From - bei einer Shared Mailbox
+    # ist $From (Absender) bewusst verschieden von $AuthUser (anmeldender Benutzer).
+    if ($Flow -ne 'ClientCredentials' -and $tokenUser -and ($tokenUser -ne $AuthUser)) {
+        throw ("Token gehoert zu '$tokenUser', angemeldet werden sollte aber als '$AuthUser'. " +
                "Du bist im Browser mit dem falschen Konto angemeldet. " +
-               "Melde dich als '$From' an (mit -ForceLogin wird die Kontoauswahl erzwungen) " +
-               "oder setze -From auf '$tokenUser'.")
+               "Melde dich als '$AuthUser' an (mit -ForceLogin wird die Kontoauswahl erzwungen) " +
+               "oder setze -AuthUser auf '$tokenUser'.")
     }
 }
 
+if ($AuthUser -ne $From) {
+    Write-Host "Anmeldung als '$AuthUser', Versand als '$From' (Shared Mailbox / SendAs)." -ForegroundColor Cyan
+}
 Write-Host "Sende E-Mail ueber $SmtpServer`:$Port (XOAUTH2)..." -ForegroundColor Cyan
-Send-MailXoauth2 -Server $SmtpServer -Port $Port -User $From -AccessToken $token `
+# XOAUTH2-user = Anmelde-Identitaet ($AuthUser); MAIL FROM / From-Header = Absender ($From)
+Send-MailXoauth2 -Server $SmtpServer -Port $Port -User $AuthUser -AccessToken $token `
     -From $From -To $To -Cc $Cc -Subject $Subject -Body $Body -Html:$BodyAsHtml.IsPresent
 
 Write-Host "E-Mail erfolgreich versendet an: $($To -join ', ')" -ForegroundColor Green

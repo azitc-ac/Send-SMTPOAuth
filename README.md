@@ -49,15 +49,32 @@ Ein Skript, drei Flows:
 # Device-Code (Login woanders)
 .\Send-SmtpOAuth.ps1 -Flow DeviceCode -TenantId organizations `
     -ClientId <appid> -From me@contoso.com -To you@contoso.com -Subject 'Hi' -Body 'Test'
+
+# Shared Mailbox: anmelden als lizenzierter Benutzer, senden als Shared Mailbox
+.\Send-SmtpOAuth.ps1 -Flow AuthorizationCode -TenantId organizations -ClientId <appid> `
+    -AuthUser me@contoso.com -From info@contoso.com `
+    -To you@contoso.com -Subject 'Hi' -Body 'Test'
 ```
 
-Nützliche Schalter: `-BodyAsHtml`, `-Cc`, `-ForceLogin` (Cache ignorieren),
-`-TokenCachePath`, `-RedirectPort`, `-Verbose` (zeigt den SMTP-Dialog).
+Nützliche Schalter: `-BodyAsHtml`, `-Cc`, `-AuthUser` (Shared Mailbox),
+`-ForceLogin` (frischer Login + Kontoauswahl), `-TokenCachePath`, `-RedirectPort`,
+`-Verbose` (zeigt SMTP-Dialog + Token-Claims).
+
+## Shared Mailbox
+Bei einer Shared Mailbox ist die Anmelde-Identität bewusst eine andere als der Absender:
+- **`-AuthUser`** = lizenzierter Benutzer, der sich anmeldet (XOAUTH2-`user=`, muss zum Token passen)
+- **`-From`** = Shared-Mailbox-Adresse (MAIL FROM / `From:`-Header)
+
+Voraussetzung in Exchange Online: Der `-AuthUser` braucht **SendAs**-Recht auf die Shared Mailbox
+(`Add-RecipientPermission -Identity info@contoso.com -Trustee me@contoso.com -AccessRights SendAs`),
+und **sein** Postfach muss SMTP AUTH aktiviert haben. Ohne `-AuthUser` sind Anmeldung und Absender
+identisch (Normalfall persönliches Postfach).
 
 ## Hinweise
 - Delegierte Flows cachen das **Refresh-Token** DPAPI-verschlüsselt unter
-  `%LOCALAPPDATA%\SmtpOAuth\token.<ClientId>.xml` (nur derselbe Benutzer/Rechner kann es lesen).
-  Weitere Sendungen kommen dann ohne erneuten Login aus.
+  `%LOCALAPPDATA%\SmtpOAuth\token.<ClientId>.<AuthUser>.xml` (pro Benutzer; nur derselbe
+  Benutzer/Rechner kann es lesen). Weitere Sendungen kommen dann ohne erneuten Login aus.
+  Beim Wechsel des Postfachs wird nie das Token eines anderen Kontos wiederverwendet.
 - Microsoft deaktiviert Basic-SMTP-Auth laufend – XOAUTH2 ist der unterstützte Weg.
 - Bei `535 5.7.139 ... SmtpClientAuthentication is disabled` muss SMTP AUTH org-/postfachseitig
   aktiviert werden.
