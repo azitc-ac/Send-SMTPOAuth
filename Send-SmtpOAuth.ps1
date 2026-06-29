@@ -83,6 +83,11 @@
 .PARAMETER ForceLogin
     Erzwingt bei delegierten Flows einen neuen Login und ignoriert das Cache.
 
+.PARAMETER NoBrowser
+    Nur DeviceCode: unterdrueckt das automatische Oeffnen der Geraete-Login-Seite und das
+    Kopieren des Codes in die Zwischenablage. Sinnvoll, wenn der Login bewusst auf einem
+    ANDEREN Geraet erfolgt oder das Skript headless laeuft.
+
 .EXAMPLE
     # App-only (unbeaufsichtigte Automatisierung)
     .\Send-SmtpOAuth.ps1 -Flow ClientCredentials -TenantId contoso.onmicrosoft.com `
@@ -148,7 +153,9 @@ param(
 
     [string]$TokenCachePath,
 
-    [switch]$ForceLogin
+    [switch]$ForceLogin,
+
+    [switch]$NoBrowser
 )
 
 Set-StrictMode -Version Latest
@@ -320,6 +327,27 @@ function Get-AccessToken-DeviceCode {
     Write-Host ""
     Write-Host $resp.message -ForegroundColor Yellow
     Write-Host ""
+
+    # Komfort fuer lokale Tests: Code ins Clipboard + Geraete-Login-Seite oeffnen (best effort).
+    # Mit -NoBrowser unterdrueckbar (z.B. wenn der Login bewusst auf einem ANDEREN Geraet erfolgt).
+    if (-not $NoBrowser) {
+        $verifyUri = if ($resp.PSObject.Properties.Name -contains 'verification_uri') {
+            $resp.verification_uri          # vom Server geliefert, meist https://microsoft.com/devicelogin
+        } else { 'https://microsoft.com/devicelogin' }
+        try {
+            Set-Clipboard -Value $resp.user_code -ErrorAction Stop
+            Write-Host "Code '$($resp.user_code)' in die Zwischenablage kopiert." -ForegroundColor Cyan
+        } catch {
+            Write-Warning "Clipboard nicht verfuegbar ($($_.Exception.Message)) - Code bitte manuell eingeben."
+        }
+        try {
+            Start-Process $verifyUri
+            Write-Host "Browser geoeffnet: $verifyUri - Code mit Strg+V einfuegen." -ForegroundColor Cyan
+        } catch {
+            Write-Warning "Browser konnte nicht geoeffnet werden ($($_.Exception.Message)) - URL bitte manuell oeffnen."
+        }
+        Write-Host ""
+    }
 
     $interval = [int]$resp.interval
     if ($interval -lt 1) { $interval = 5 }
